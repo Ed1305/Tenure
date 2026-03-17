@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpha Konnect · tenure dashboard (full)</title>
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Chart.js & SheetJS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Inter',sans-serif; color:#fff; }
+        body { min-height:100vh; background:linear-gradient(145deg,#0b1120 0%,#19223f 100%); padding:1rem 0.8rem; display:flex; justify-content:center; align-items:flex-start; font-size:12.5px; }
+        .dashboard { max-width:1600px; width:100%; }
+        .top-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom:1.2rem; gap:0.8rem; }
+        .title-glow { font-size:1.4rem; font-weight:700; background:linear-gradient(to right,#fff,#b9c7ff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow:0 0 20px rgba(90,119,255,0.5); letter-spacing:-0.5px; }
+        .badge-month { background:rgba(255,255,255,0.1); backdrop-filter:blur(8px); padding:0.3rem 1rem; border-radius:60px; border:1px solid rgba(255,255,255,0.15); color:#cddcff; font-weight:500; font-size:0.75rem; box-shadow:0 10px 25px -8px rgba(0,0,0,0.5); display:flex; align-items:center; gap:6px; }
+        .badge-month i { color:#7997ff; }
+        .fetch-area { display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; }
+        .admin-section { background:rgba(0,0,0,0.3); backdrop-filter:blur(8px); border-radius:30px; padding:0.5rem 1rem; border:1px solid #3f5182; display:flex; align-items:center; gap:0.8rem; transition:opacity 0.2s; }
+        .admin-section.locked { opacity:0.6; }
+        .admin-section input[type="password"] { background:rgba(20,30,58,0.9); border:1px solid #3f5182; border-radius:30px; padding:0.3rem 0.8rem; color:white; font-size:0.75rem; outline:none; width:100px; }
+        .admin-section button { background:linear-gradient(115deg,#2a3f9e,#4c2faa); border:none; padding:0.3rem 0.8rem; border-radius:30px; color:white; font-weight:600; font-size:0.7rem; cursor:pointer; transition:0.2s; border:1px solid rgba(255,255,255,0.15); }
+        .admin-section button:hover { transform:translateY(-1px); box-shadow:0 8px 15px -5px #26388b; }
+        .admin-section button:disabled { opacity:0.5; pointer-events:none; }
+        .file-label { background:rgba(255,255,255,0.05); border:1px dashed #4f6bb3; border-radius:40px; padding:0.3rem 0.8rem; color:white; font-weight:400; font-size:0.75rem; display:flex; align-items:center; gap:6px; cursor:pointer; transition:0.2s; }
+        .file-label:hover { background:rgba(79,107,179,0.2); border-color:#809cff; }
+        .file-label i { color:#6e8bff; }
+        input[type="file"] { display:none; }
+        .btn-primary { background:linear-gradient(115deg,#2a3f9e,#4c2faa); border:none; padding:0.4rem 1.2rem; border-radius:40px; color:white; font-weight:600; font-size:0.75rem; box-shadow:0 12px 25px -8px #1f2b6e; display:flex; align-items:center; gap:6px; cursor:pointer; transition:0.2s; border:1px solid rgba(255,255,255,0.15); }
+        .btn-primary:hover { transform:translateY(-2px); box-shadow:0 18px 30px -8px #26388b; }
+        .btn-primary:disabled { opacity:0.5; pointer-events:none; }
+        .branch-panel { display:flex; background:rgba(15,23,47,0.7); backdrop-filter:blur(15px); border-radius:70px; padding:0.2rem; border:1px solid rgba(255,255,255,0.1); margin:1rem 0 1.2rem 0; width:fit-content; }
+        .branch-option { padding:0.3rem 1.2rem; border-radius:40px; color:#b2c3ff; font-weight:500; font-size:0.75rem; cursor:pointer; transition:0.2s; user-select:none; }
+        .branch-option.active { background:linear-gradient(135deg,#4b6ef0,#613dcf); color:white; box-shadow:0 6px 15px #26388b; }
+        .month-selector { display:flex; align-items:center; gap:0.5rem; margin-left:1rem; }
+        .month-selector select { background:rgba(20,30,58,0.9); border:1px solid #3f5182; border-radius:30px; padding:0.2rem 1rem 0.2rem 0.6rem; color:white; font-size:0.7rem; outline:none; cursor:pointer; }
+        .cards-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:0.8rem; margin-bottom:1.5rem; }
+        .stat-card { background:rgba(20,30,58,0.7); backdrop-filter:blur(12px); border-radius:18px; padding:0.8rem 0.6rem; border:1px solid rgba(255,255,255,0.08); box-shadow:0 25px 40px -15px black; color:white; }
+        .stat-card i { font-size:1.3rem; background:linear-gradient(145deg,#5673e0,#9b7bff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:0.2rem; }
+        .stat-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:1px; color:#98acdd; }
+        .stat-number { font-size:1.3rem; font-weight:700; line-height:1.2; }
+        .section-title { font-size:1rem; font-weight:600; color:white; margin:1rem 0 0.5rem 0; display:flex; align-items:center; gap:8px; }
+        .section-title span { background:rgba(79,107,255,0.3); padding:0.2rem 0.6rem; border-radius:40px; font-size:0.65rem; color:#b7cbff; }
+        .chart-container { background:rgba(18,28,55,0.6); backdrop-filter:blur(10px); border-radius:18px; padding:0.8rem 0.3rem; border:1px solid #2f4070; margin-bottom:1rem; height:180px; display:flex; align-items:center; justify-content:center; color:#6f87b0; }
+        .table-wrapper { background:rgba(13,20,40,0.7); backdrop-filter:blur(10px); border-radius:14px; padding:0.5rem; border:1px solid #253458; overflow-x:auto; margin-bottom:1rem; }
+        table { width:100%; border-collapse:collapse; color:#e0e7ff; font-size:0.7rem; }
+        th { text-align:left; padding:0.5rem 0.3rem 0.3rem 0.3rem; font-weight:600; color:#a6befa; border-bottom:1px solid #334777; }
+        td { padding:0.3rem; border-bottom:1px solid #1f2a4a; }
+        .team-badge { background:#313e6b; padding:0.1rem 0.4rem; border-radius:30px; font-size:0.65rem; font-weight:500; }
+        .footnote { color:#6d83b0; font-size:0.6rem; margin-top:0.3rem; }
+        .flex-charts { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+        .flex-charts-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin-bottom:1rem; }
+        .empty-message { text-align:center; color:#859ac0; padding:1rem; font-style:italic; font-size:0.75rem; }
+        .filter-row { display:flex; align-items:center; gap:0.8rem; margin:0.5rem 0 1rem 0; background:rgba(255,255,255,0.03); padding:0.4rem 0.8rem; border-radius:30px; width:fit-content; }
+        .filter-row label { color:#b2c3ff; font-size:0.7rem; }
+        .filter-row select { background:rgba(20,30,58,0.9); border:1px solid #3f5182; border-radius:30px; padding:0.2rem 1rem 0.2rem 0.6rem; color:white; font-size:0.7rem; outline:none; cursor:pointer; }
+        .filter-row select option { background:#1a2340; }
+        .lock-icon { cursor:pointer; color:#b2c3ff; font-size:1rem; transition:0.2s; }
+        .lock-icon:hover { color:white; }
+        .spinner { border:2px solid rgba(255,255,255,0.3); border-top:2px solid white; border-radius:50%; width:16px; height:16px; animation:spin 1s linear infinite; display:inline-block; margin-left:8px; }
+        @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+        @media (max-width:800px) { .flex-charts, .flex-charts-3 { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="top-bar">
+            <div class="title-glow"><i class="fas fa-chart-pie" style="margin-right: 6px; color: #6482ff;"></i>ALPHA KONNECT TENURE DASHBOARD</div>
+            <div class="fetch-area">
+                <div class="badge-month" id="monthDisplay"><i class="far fa-calendar-alt"></i> <span id="fileNameSpan">no file</span></div>
+                <div class="admin-section locked" id="adminPanel">
+                    <i class="fas fa-lock lock-icon" id="lockToggle" title="Admin access"></i>
+                    <input type="password" id="accessCode" placeholder="code" value="">
+                    <button id="unlockBtn">unlock</button>
+                    <div style="display: none;" id="adminControls">
+                        <label for="excelUpload" class="file-label"><i class="fas fa-cloud-upload-alt"></i> choose excel</label>
+                        <input type="file" id="excelUpload" accept=".xlsx, .xls">
+                        <button class="btn-primary" id="fetchBtn" style="padding:0.3rem 1rem;">
+                            <i class="fas fa-sync-alt"></i> upload
+                            <span id="uploadSpinner" class="spinner" style="display: none;"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; flex-wrap: wrap;">
+            <div class="branch-panel" id="branchSelector">
+                <div class="branch-option active" data-branch="combine">🌐 COMBINED</div>
+                <div class="branch-option" data-branch="INVNT CAPE TOWN">🏢 INVNT CAPE TOWN</div>
+                <div class="branch-option" data-branch="ALPHA">⚡ ALPHA</div>
+            </div>
+            <div class="month-selector">
+                <label for="monthSelect" style="color:#b2c3ff; font-size:0.7rem;">Month:</label>
+                <select id="monthSelect">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="cards-grid" id="summaryCards">
+            <div class="stat-card"><i class="fas fa-users"></i><div class="stat-label">TOTAL ACTIVE STAFF</div><div class="stat-number">—</div></div>
+            <div class="stat-card"><i class="fas fa-calendar-alt"></i><div class="stat-label">AVG TENURE (MONTHS)</div><div class="stat-number">—</div></div>
+            <div class="stat-card"><i class="fas fa-clock"></i><div class="stat-label">AVG TENURE (DAYS)</div><div class="stat-number">—</div></div>
+        </div>
+
+        <!-- Active employees charts -->
+        <div class="flex-charts">
+            <div>
+                <div class="section-title" id="branchTitle">🌍 COMBINED BRANCH <span>active staff</span></div>
+                <div class="chart-container" id="combinedChartContainer">
+                    <canvas id="combinedChart" style="display: none;"></canvas>
+                    <span class="empty-message">📁 upload a file to see chart</span>
+                </div>
+                <div class="table-wrapper" id="combinedStatsTable">
+                    <div class="empty-message">no data</div>
+                </div>
+            </div>
+            <div>
+                <div class="section-title">👥 PER TEAM (active) <span>tenure breakdown</span></div>
+                <div class="chart-container" id="teamChartContainer" style="height: 160px;">
+                    <canvas id="teamChart" style="display: none;"></canvas>
+                    <span class="empty-message">📁 upload a file to see chart</span>
+                </div>
+                <div class="table-wrapper" id="teamTableContainer">
+                    <div class="empty-message">no data</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inactive employees charts (new) -->
+        <div class="section-title">📊 INACTIVE STAFF CHARTS <span>by branch & team</span></div>
+        <div class="flex-charts-3">
+            <div>
+                <div class="chart-container" id="inactiveCombinedChartContainer" style="height: 150px;">
+                    <canvas id="inactiveCombinedChart" style="display: none;"></canvas>
+                    <span class="empty-message">no data</span>
+                </div>
+                <p style="text-align:center; color:#b2c3ff;">Combined</p>
+            </div>
+            <div>
+                <div class="chart-container" id="inactiveBranchChartContainer" style="height: 150px;">
+                    <canvas id="inactiveBranchChart" style="display: none;"></canvas>
+                    <span class="empty-message">no data</span>
+                </div>
+                <p style="text-align:center; color:#b2c3ff;">Per Branch</p>
+            </div>
+            <div>
+                <div class="chart-container" id="inactiveTeamChartContainer" style="height: 150px;">
+                    <canvas id="inactiveTeamChart" style="display: none;"></canvas>
+                    <span class="empty-message">no data</span>
+                </div>
+                <p style="text-align:center; color:#b2c3ff;">Per Team</p>
+            </div>
+        </div>
+
+        <!-- Team filter -->
+        <div class="filter-row">
+            <label for="teamFilter"><i class="fas fa-filter" style="color:#6e8bff;"></i> Filter by team:</label>
+            <select id="teamFilter">
+                <option value="ALL">All Teams</option>
+            </select>
+        </div>
+
+        <!-- Inactive staff table -->
+        <div class="section-title" style="margin-top: 1rem;">📋 INACTIVE STAFF <span>RESIGNED/AWOL/TERMINATED/DROPPED</span></div>
+        <div class="table-wrapper" id="inactiveTable">
+            <div class="empty-message">no inactive employees</div>
+        </div>
+
+        <!-- Active staff table -->
+        <div class="section-title">✅ ACTIVE STAFF <span>TEAM / INCUBATION only</span></div>
+        <div class="table-wrapper" id="activeTable">
+            <div class="empty-message">no active employees</div>
+        </div>
+
+        <div class="footnote"><i class="far fa-clock"></i> Tenure: today for active, termination date for inactive. Inactive team from "Manager" column. All resigned, AWOL, terminated, dropped out → Inactive tab.</div>
+    </div>
+
+    <script>
+        (function() {
+            // Supabase setup
+            const supabaseUrl = 'https://vnuvmbnlxhhhbfpiwzef.supabase.co';
+            const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXZtYm5seGhoaGJmcGl3emVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNzUzNDIsImV4cCI6MjA4Nzc1MTM0Mn0.jnImxezvHLiRCdUkgBLgQ97uW-9FHpfcgL3ipvOLpas';
+            const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+            // Global state
+            let currentBranch = "combine";
+            let fileName = "no file";
+            let today = new Date();
+            let currentTeamFilter = "ALL";
+
+            // Allowed active teams per branch
+            const allowedActiveTeams = {
+                "INVNT CAPE TOWN": ["TEAM PROSPER", "TEAM MOSES", "TEAM SONWABILE", "INVNT INCUBATION"],
+                "ALPHA": ["TEAM ISIPHO", "TEAM AYABONGA", "TEAM THANDUXOLO", "TEAM KHAYALETHU", "ALPHA INCUBATION"]
+            };
+
+            // Chart instances
+            let combinedChartInst, teamChartInst;
+            let inactiveCombinedChartInst, inactiveBranchChartInst, inactiveTeamChartInst;
+
+            // DOM elements
+            const monthSpan = document.getElementById('fileNameSpan');
+            const branchDivs = document.querySelectorAll('.branch-option');
+            const summaryDiv = document.getElementById('summaryCards');
+            const combinedStatsDiv = document.getElementById('combinedStatsTable');
+            const teamTableDiv = document.getElementById('teamTableContainer');
+            const inactiveTableDiv = document.getElementById('inactiveTable');
+            const activeTableDiv = document.getElementById('activeTable');
+            const fileInput = document.getElementById('excelUpload');
+            const fetchBtn = document.getElementById('fetchBtn');
+            const teamFilterSelect = document.getElementById('teamFilter');
+            const branchTitle = document.getElementById('branchTitle');
+            const monthSelect = document.getElementById('monthSelect');
+            const lockToggle = document.getElementById('lockToggle');
+            const accessCodeInput = document.getElementById('accessCode');
+            const unlockBtn = document.getElementById('unlockBtn');
+            const adminPanel = document.getElementById('adminPanel');
+            const adminControls = document.getElementById('adminControls');
+            const uploadSpinner = document.getElementById('uploadSpinner');
+
+            // Chart canvases
+            const combinedCanvas = document.getElementById('combinedChart');
+            const teamCanvas = document.getElementById('teamChart');
+            const inactiveCombinedCanvas = document.getElementById('inactiveCombinedChart');
+            const inactiveBranchCanvas = document.getElementById('inactiveBranchChart');
+            const inactiveTeamCanvas = document.getElementById('inactiveTeamChart');
+            const combinedContainer = document.getElementById('combinedChartContainer');
+            const teamContainer = document.getElementById('teamChartContainer');
+            const inactiveCombinedContainer = document.getElementById('inactiveCombinedChartContainer');
+            const inactiveBranchContainer = document.getElementById('inactiveBranchChartContainer');
+            const inactiveTeamContainer = document.getElementById('inactiveTeamChartContainer');
+
+            // Admin state
+            let adminUnlocked = false;
+            const validCode = 'ak_2026';
+
+            // Lock toggle: click the lock icon to lock/unlock admin panel
+            lockToggle.addEventListener('click', () => {
+                if (adminUnlocked) {
+                    // lock it
+                    adminUnlocked = false;
+                    adminPanel.classList.add('locked');
+                    adminControls.style.display = 'none';
+                    lockToggle.className = 'fas fa-lock lock-icon';
+                } else {
+                    // unlock if code is correct
+                    if (accessCodeInput.value === validCode) {
+                        adminUnlocked = true;
+                        adminPanel.classList.remove('locked');
+                        adminControls.style.display = 'inline-flex';
+                        lockToggle.className = 'fas fa-unlock-alt lock-icon';
+                        accessCodeInput.value = ''; // clear the code
+                    } else {
+                        alert('Invalid access code');
+                    }
+                }
+            });
+
+            // Also keep unlock button for convenience
+            unlockBtn.addEventListener('click', () => {
+                if (accessCodeInput.value === validCode) {
+                    adminUnlocked = true;
+                    adminPanel.classList.remove('locked');
+                    adminControls.style.display = 'inline-flex';
+                    lockToggle.className = 'fas fa-unlock-alt lock-icon';
+                    accessCodeInput.value = ''; // clear the code
+                } else {
+                    alert('Invalid access code');
+                }
+            });
+
+            // helpers
+            function daysBetween(d1, d2) {
+                const diff = Math.abs(d2 - d1);
+                return Math.round(diff / (1000 * 60 * 60 * 24));
+            }
+
+            function parseDate(excelDate) {
+                if (!excelDate) return null;
+                if (typeof excelDate === 'number') {
+                    return new Date((excelDate - 25569) * 86400 * 1000);
+                }
+                const d = new Date(excelDate);
+                if (!isNaN(d)) return d;
+                if (typeof excelDate === 'string') {
+                    let parts = excelDate.split('/');
+                    if (parts.length === 3) {
+                        let month = parseInt(parts[0], 10) - 1;
+                        let day = parseInt(parts[1], 10);
+                        let year = parseInt(parts[2], 10);
+                        d = new Date(year, month, day);
+                        if (!isNaN(d)) return d;
+                    }
+                }
+                return null;
+            }
+
+            function extractMonthFromFilename(name) {
+                const monthMap = {
+                    january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+                    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
+                };
+                const match = name.match(/\b([A-Za-z]+)\s+(\d{4})\b/i);
+                if (match) {
+                    let monthName = match[1].toLowerCase();
+                    let year = match[2];
+                    let monthNum = monthMap[monthName];
+                    if (monthNum) {
+                        return `${year}-${monthNum}`;
+                    }
+                }
+                console.warn('Could not extract month from filename, using current month');
+                let d = new Date();
+                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            }
+
+            function updateMonthLabel(name) {
+                fileName = name || 'no file';
+                monthSpan.innerText = fileName;
+            }
+
+            // ---------- PARSER with detailed logging ----------
+            function parseWorkbook(workbook, fileName) {
+                const sheets = ['INVNT CAPE TOWN', 'ALPHA'];
+                let allEmployees = [];
+
+                sheets.forEach(sheetName => {
+                    console.log(`\n--- Processing sheet: ${sheetName} ---`);
+                    const worksheet = workbook.Sheets[sheetName];
+                    if (!worksheet) {
+                        console.log(`Sheet ${sheetName} not found`);
+                        return;
+                    }
+                    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+                    if (rows.length < 5) {
+                        console.log(`Sheet ${sheetName} has too few rows`);
+                        return;
+                    }
+
+                    // Locate main header row (contains "EMP CODE" in column A)
+                    let mainHeaderRowIdx = -1;
+                    for (let i = 0; i < rows.length; i++) {
+                        const row = rows[i];
+                        if (row[0] && row[0].toString().includes("EMP CODE")) {
+                            mainHeaderRowIdx = i;
+                            console.log(`Main header found at row ${i}`);
+                            break;
+                        }
+                    }
+                    if (mainHeaderRowIdx === -1) {
+                        console.log(`Main header not found in ${sheetName}`);
+                        return;
+                    }
+
+                    // ----- ACTIVE EMPLOYEES -----
+                    let currentSection = "";
+                    let activeCount = 0;
+                    for (let i = mainHeaderRowIdx + 1; i < rows.length; i++) {
+                        const row = rows[i];
+                        if (!row || row.length === 0) continue;
+                        const firstCell = row[0] ? row[0].toString().trim() : '';
+                        const secondCell = row[1] ? row[1].toString().trim() : '';
+
+                        const termKeywords = ["RESIGNED EMPLOYEES", "AWOL EMPLOYEES", "TERMINATED", "DROPPED OUT INCUBATION"];
+                        if (termKeywords.some(k => secondCell.includes(k))) {
+                            console.log(`Termination section header '${secondCell}' found at row ${i}, stopping active parsing`);
+                            break;
+                        }
+
+                        if (firstCell === '' && secondCell !== '' && !secondCell.includes(',')) {
+                            currentSection = secondCell.toUpperCase().trim();
+                            console.log(`Section header: ${currentSection} at row ${i}`);
+                            continue;
+                        }
+
+                        if (firstCell === '' || firstCell === 'EMP CODE') continue;
+
+                        let empCode = firstCell;
+                        let empName = secondCell;
+                        let startDate = parseDate(row[2]);
+                        if (!startDate) continue;
+
+                        let team = currentSection;
+                        if (!allowedActiveTeams[sheetName].includes(team)) {
+                            // console.log(`Skipping active employee ${empCode} because team ${team} not allowed`);
+                            continue;
+                        }
+
+                        let tenureDays = daysBetween(startDate, today);
+                        let tenureMonths = tenureDays / 30.4375;
+
+                        allEmployees.push({
+                            month: extractMonthFromFilename(fileName),
+                            branch: sheetName,
+                            emp_code: empCode,
+                            name: empName,
+                            start_date: startDate.toISOString().split('T')[0],
+                            team: team,
+                            status: 'Active',
+                            end_date: null,
+                            tenure_days: tenureDays,
+                            tenure_months: Math.round(tenureMonths * 10) / 10
+                        });
+                        activeCount++;
+                    }
+                    console.log(`Active employees found in ${sheetName}: ${activeCount}`);
+
+                    // ----- INACTIVE EMPLOYEES (from termination tables) -----
+                    const termHeaders = ["RESIGNED EMPLOYEES", "AWOL EMPLOYEES", "TERMINATED", "DROPPED OUT INCUBATION"];
+                    let inactiveCount = 0;
+
+                    for (let i = mainHeaderRowIdx + 1; i < rows.length; i++) {
+                        const row = rows[i];
+                        if (!row || row.length < 2) continue;
+                        const secondCell = row[1] ? row[1].toString().trim() : '';
+
+                        let status = null;
+                        for (let h of termHeaders) {
+                            if (secondCell.includes(h)) {
+                                if (h.includes("RESIGNED")) status = "Resigned";
+                                else if (h.includes("AWOL")) status = "AWOL";
+                                else if (h.includes("TERMINATED")) status = "Terminated";
+                                else if (h.includes("DROPPED")) status = "Dropped Out";
+                                console.log(`Found termination section: ${status} at row ${i}`);
+                                break;
+                            }
+                        }
+                        if (!status) continue;
+
+                        // This row is the header row of the termination section.
+                        // Find column indices: termination date and manager
+                        let termDateCol = -1, managerCol = -1;
+                        for (let j = 0; j < row.length; j++) {
+                            const cell = row[j] ? row[j].toString().toUpperCase() : '';
+                            if (cell.includes('TERMINATION DATE') || cell.includes('RETURN DATE') || cell.includes('END DATE')) termDateCol = j;
+                            if (cell.includes('MANAGER') || cell.includes('TEAM/') || cell.includes('DEPARTMENT')) managerCol = j;
+                        }
+                        console.log(`Termination date column: ${termDateCol}, Manager column: ${managerCol}`);
+
+                        // Now iterate rows starting from i+1 until next section or empty
+                        for (let j = i + 1; j < rows.length; j++) {
+                            const r = rows[j];
+                            if (!r || r.length === 0) break;
+                            const nextSecond = r[1] ? r[1].toString().trim() : '';
+                            if (termHeaders.some(h => nextSecond.includes(h))) {
+                                console.log(`Next termination section at row ${j}, moving outer loop`);
+                                i = j - 1;
+                                break;
+                            }
+                            let empCode = r[0] ? r[0].toString().trim() : '';
+                            if (empCode === '' || empCode === 'EMPLOYEE CODE' || empCode === 'TOTAL:') continue;
+
+                            let empName = r[1] ? r[1].toString().trim() : '—';
+                            let startDate = parseDate(r[2]);
+                            if (!startDate) continue;
+                            let endDate = null;
+                            if (termDateCol !== -1 && r[termDateCol]) {
+                                endDate = parseDate(r[termDateCol]);
+                            }
+                            let team = 'OTHER';
+                            if (managerCol !== -1 && r[managerCol]) {
+                                team = r[managerCol].toString().trim().toUpperCase();
+                            }
+
+                            let tenureDays = endDate ? daysBetween(startDate, endDate) : daysBetween(startDate, today);
+                            let tenureMonths = tenureDays / 30.4375;
+
+                            allEmployees.push({
+                                month: extractMonthFromFilename(fileName),
+                                branch: sheetName,
+                                emp_code: empCode,
+                                name: empName,
+                                start_date: startDate.toISOString().split('T')[0],
+                                team: team,
+                                status: status,
+                                end_date: endDate ? endDate.toISOString().split('T')[0] : null,
+                                tenure_days: tenureDays,
+                                tenure_months: Math.round(tenureMonths * 10) / 10
+                            });
+                            inactiveCount++;
+                        }
+                    }
+                    console.log(`Inactive employees found in ${sheetName}: ${inactiveCount}`);
+                });
+
+                console.log('Total parsed employees:', allEmployees.length);
+                return allEmployees;
+            }
+
+            // ---------- SUPABASE: fetch months and data ----------
+            async function loadMonths() {
+                const { data, error } = await supabase
+                    .from('employees')
+                    .select('month')
+                    .order('month', { ascending: false });
+                if (error) {
+                    console.error('Error loading months:', error);
+                    monthSelect.innerHTML = '<option value="">Error loading months</option>';
+                    return;
+                }
+                const months = [...new Set(data.map(d => d.month))];
+                monthSelect.innerHTML = '';
+                if (months.length === 0) {
+                    monthSelect.innerHTML = '<option value="">No data</option>';
+                    renderAll([]);
+                    return;
+                }
+                months.forEach(m => {
+                    let opt = document.createElement('option');
+                    opt.value = m;
+                    let [year, monthNum] = m.split('-');
+                    let date = new Date(year, monthNum-1, 1);
+                    opt.textContent = date.toLocaleDateString('en-US', { year:'numeric', month:'long' });
+                    monthSelect.appendChild(opt);
+                });
+                monthSelect.value = months[0];
+                await loadMonthData(months[0]);
+            }
+
+            async function loadMonthData(month) {
+                const { data, error } = await supabase
+                    .from('employees')
+                    .select('*')
+                    .eq('month', month);
+                if (error) {
+                    console.error('Error loading data:', error);
+                    alert('Error loading data: ' + error.message);
+                    return;
+                }
+                console.log(`Loaded ${data.length} employees for month ${month}`);
+                renderAll(data);
+            }
+
+            async function saveEmployees(employees) {
+                console.log(`Inserting ${employees.length} employees...`);
+                const { data, error } = await supabase
+                    .from('employees')
+                    .insert(employees);
+                if (error) {
+                    console.error('Supabase insert error:', error);
+                    throw error;
+                }
+                console.log(`Inserted ${employees.length} employees successfully`);
+            }
+
+            // Subscribe to realtime changes
+            supabase
+                .channel('employees_changes')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, payload => {
+                    console.log('Realtime update', payload);
+                    loadMonths();
+                })
+                .subscribe();
+
+            // ---------- RENDER functions ----------
+            function renderAll(employees) {
+                let filtered = employees;
+                if (currentBranch !== 'combine') {
+                    filtered = employees.filter(e => e.branch === currentBranch);
+                }
+
+                const active = filtered.filter(e => e.status === 'Active');
+                const inactive = filtered.filter(e => e.status !== 'Active');
+
+                const totalActive = active.length;
+                let avgMonths = 0, avgDays = 0;
+                if (totalActive > 0) {
+                    avgMonths = active.reduce((acc, e) => acc + e.tenure_months, 0) / totalActive;
+                    avgDays = active.reduce((acc, e) => acc + e.tenure_days, 0) / totalActive;
+                }
+                summaryDiv.innerHTML = `
+                    <div class="stat-card"><i class="fas fa-users"></i><div class="stat-label">TOTAL ACTIVE STAFF</div><div class="stat-number">${totalActive || '—'}</div></div>
+                    <div class="stat-card"><i class="fas fa-calendar-alt"></i><div class="stat-label">AVG TENURE (MONTHS)</div><div class="stat-number">${totalActive ? avgMonths.toFixed(1) : '—'}</div></div>
+                    <div class="stat-card"><i class="fas fa-clock"></i><div class="stat-label">AVG TENURE (DAYS)</div><div class="stat-number">${totalActive ? Math.round(avgDays) : '—'}</div></div>
+                `;
+
+                if (currentBranch === 'combine') {
+                    branchTitle.innerHTML = '🌍 COMBINED BRANCH <span>active staff</span>';
+                } else {
+                    branchTitle.innerHTML = `🏢 ${currentBranch} <span>active staff</span>`;
+                }
+
+                renderCombinedStats(active);
+                renderTeamTablesAndChart(active);
+                renderInactiveCharts(inactive, employees); // pass all employees for branch/team breakdown
+                renderActiveInactiveTables(active, inactive);
+
+                branchDivs.forEach(b => b.classList.remove('active'));
+                if (currentBranch === 'combine') branchDivs[0].classList.add('active');
+                else if (currentBranch === 'INVNT CAPE TOWN') branchDivs[1].classList.add('active');
+                else if (currentBranch === 'ALPHA') branchDivs[2].classList.add('active');
+            }
+
+            function renderCombinedStats(activeEmps) {
+                const total = activeEmps.length;
+                let avgM = 0, avgD = 0;
+                if (total > 0) {
+                    avgM = activeEmps.reduce((a,b)=>a+b.tenure_months,0)/total;
+                    avgD = activeEmps.reduce((a,b)=>a+b.tenure_days,0)/total;
+                }
+
+                if (total === 0) {
+                    combinedStatsDiv.innerHTML = `<div class="empty-message">no data</div>`;
+                } else {
+                    combinedStatsDiv.innerHTML = `
+                        <table>
+                            <tr><th>Description</th><th>Number</th></tr>
+                            <tr><td>TOTAL ACTIVE STAFF</td><td>${total}</td></tr>
+                            <tr><td>AVERAGE TENURE MONTHS</td><td>${avgM.toFixed(1)}</td></tr>
+                            <tr><td>AVERAGE TENURE DAYS</td><td>${Math.round(avgD)}</td></tr>
+                        </table>
+                    `;
+                }
+
+                const bins = [0,3,6,9,12,18,24,36];
+                const counts = new Array(bins.length-1).fill(0);
+                activeEmps.forEach(e => {
+                    const m = e.tenure_months;
+                    for (let i=0; i<bins.length-1; i++) {
+                        if (m >= bins[i] && m < bins[i+1]) { counts[i]++; break; }
+                    }
+                });
+
+                if (total === 0) {
+                    combinedCanvas.style.display = 'none';
+                    combinedContainer.innerHTML = '<canvas id="combinedChart" style="display: none;"></canvas><span class="empty-message">📁 upload a file to see chart</span>';
+                } else {
+                    combinedContainer.innerHTML = '<canvas id="combinedChart"></canvas>';
+                    // Reassign canvas because innerHTML replaced it
+                    const newCanvas = document.getElementById('combinedChart');
+                    if (combinedChartInst) combinedChartInst.destroy();
+                    const ctx = newCanvas.getContext('2d');
+                    combinedChartInst = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['0-3m', '3-6m', '6-9m', '9-12m', '12-18m', '18-24m', '24-36m'],
+                            datasets: [{
+                                label: 'staff count',
+                                data: counts,
+                                backgroundColor: '#5f7eff',
+                                borderRadius: 8
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                    });
+                }
+            }
+
+            function renderTeamTablesAndChart(activeEmps) {
+                const teamMap = new Map();
+                activeEmps.forEach(e => {
+                    const key = `${e.branch} - ${e.team}`;
+                    if (!teamMap.has(key)) teamMap.set(key, { branch: e.branch, team: e.team, count:0, sumMonths:0, sumDays:0 });
+                    const rec = teamMap.get(key);
+                    rec.count++;
+                    rec.sumMonths += e.tenure_months;
+                    rec.sumDays += e.tenure_days;
+                });
+
+                if (teamMap.size === 0) {
+                    teamTableDiv.innerHTML = `<div class="empty-message">no data</div>`;
+                    teamContainer.innerHTML = '<canvas id="teamChart" style="display: none;"></canvas><span class="empty-message">📁 upload a file to see chart</span>';
+                    return;
+                }
+
+                let teamRows = '';
+                let teamLabels = [], teamAvgMonths = [];
+                teamMap.forEach((v, k) => {
+                    const avgM = v.sumMonths / v.count;
+                    const avgD = v.sumDays / v.count;
+                    teamRows += `<tr><td>${v.branch}</td><td><span class="team-badge">${v.team}</span></td><td>${v.count}</td><td>${avgM.toFixed(1)}</td><td>${Math.round(avgD)}</td></tr>`;
+                    teamLabels.push(v.team);
+                    teamAvgMonths.push(avgM);
+                });
+                teamTableDiv.innerHTML = `<table><tr><th>Branch</th><th>Team</th><th>Active</th><th>Avg months</th><th>Avg days</th></tr>${teamRows}</table>`;
+
+                teamContainer.innerHTML = '<canvas id="teamChart"></canvas>';
+                const newCanvas = document.getElementById('teamChart');
+                if (teamChartInst) teamChartInst.destroy();
+                const ctx2 = newCanvas.getContext('2d');
+                teamChartInst = new Chart(ctx2, {
+                    type: 'bar',
+                    data: {
+                        labels: teamLabels,
+                        datasets: [{
+                            label: 'avg tenure (months)',
+                            data: teamAvgMonths,
+                            backgroundColor: '#b185ff',
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+
+            function renderInactiveCharts(inactive, allEmployees) {
+                // Combined inactive count (just a bar with one value)
+                const totalInactive = inactive.length;
+                if (totalInactive === 0) {
+                    inactiveCombinedContainer.innerHTML = '<canvas id="inactiveCombinedChart" style="display: none;"></canvas><span class="empty-message">no data</span>';
+                    inactiveBranchContainer.innerHTML = '<canvas id="inactiveBranchChart" style="display: none;"></canvas><span class="empty-message">no data</span>';
+                    inactiveTeamContainer.innerHTML = '<canvas id="inactiveTeamChart" style="display: none;"></canvas><span class="empty-message">no data</span>';
+                    return;
+                }
+
+                // Combined chart: just show total inactive
+                inactiveCombinedContainer.innerHTML = '<canvas id="inactiveCombinedChart"></canvas>';
+                const combinedCtx = document.getElementById('inactiveCombinedChart').getContext('2d');
+                if (inactiveCombinedChartInst) inactiveCombinedChartInst.destroy();
+                inactiveCombinedChartInst = new Chart(combinedCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Inactive'],
+                        datasets: [{
+                            data: [totalInactive],
+                            backgroundColor: ['#ff6384'],
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                });
+
+                // Per branch: count inactive by branch
+                const branchCounts = {};
+                allEmployees.forEach(e => {
+                    if (e.status !== 'Active') {
+                        branchCounts[e.branch] = (branchCounts[e.branch] || 0) + 1;
+                    }
+                });
+                const branchLabels = Object.keys(branchCounts);
+                const branchData = branchLabels.map(b => branchCounts[b]);
+
+                inactiveBranchContainer.innerHTML = '<canvas id="inactiveBranchChart"></canvas>';
+                const branchCtx = document.getElementById('inactiveBranchChart').getContext('2d');
+                if (inactiveBranchChartInst) inactiveBranchChartInst.destroy();
+                inactiveBranchChartInst = new Chart(branchCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: branchLabels,
+                        datasets: [{
+                            label: 'Inactive count',
+                            data: branchData,
+                            backgroundColor: '#36a2eb',
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                });
+
+                // Per team: count inactive by team
+                const teamCounts = {};
+                allEmployees.forEach(e => {
+                    if (e.status !== 'Active') {
+                        teamCounts[e.team] = (teamCounts[e.team] || 0) + 1;
+                    }
+                });
+                const teamLabelsInactive = Object.keys(teamCounts);
+                const teamDataInactive = teamLabelsInactive.map(t => teamCounts[t]);
+
+                inactiveTeamContainer.innerHTML = '<canvas id="inactiveTeamChart"></canvas>';
+                const teamCtx = document.getElementById('inactiveTeamChart').getContext('2d');
+                if (inactiveTeamChartInst) inactiveTeamChartInst.destroy();
+                inactiveTeamChartInst = new Chart(teamCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: teamLabelsInactive,
+                        datasets: [{
+                            label: 'Inactive count',
+                            data: teamDataInactive,
+                            backgroundColor: '#ffcd56',
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                });
+            }
+
+            function renderActiveInactiveTables(active, inactive) {
+                const filteredActive = currentTeamFilter === 'ALL' ? active : active.filter(e => e.team === currentTeamFilter);
+                const filteredInactive = currentTeamFilter === 'ALL' ? inactive : inactive.filter(e => e.team === currentTeamFilter);
+
+                function rowHtml(e) {
+                    const endDateStr = e.end_date ? e.end_date : 'NOT APPLICABLE';
+                    const startStr = e.start_date;
+                    return `<tr>
+                        <td>${e.emp_code}</td><td>${e.name}</td><td>${startStr}</td><td>${e.team}</td>
+                        <td>${e.status}</td><td>${endDateStr}</td><td>${e.tenure_days}</td><td>${e.tenure_months}</td>
+                    </tr>`;
+                }
+
+                if (filteredInactive.length === 0) {
+                    inactiveTableDiv.innerHTML = `<div class="empty-message">no inactive employees</div>`;
+                } else {
+                    inactiveTableDiv.innerHTML = `<table><tr><th>EMP CODE</th><th>NAME</th><th>START</th><th>TEAM</th><th>STATUS</th><th>END DATE</th><th>TENURE DAYS</th><th>MONTHS</th></tr>${
+                        filteredInactive.map(rowHtml).join('')
+                    }</table>`;
+                }
+
+                if (filteredActive.length === 0) {
+                    activeTableDiv.innerHTML = `<div class="empty-message">no active employees</div>`;
+                } else {
+                    activeTableDiv.innerHTML = `<table><tr><th>EMP CODE</th><th>NAME</th><th>START</th><th>TEAM</th><th>STATUS</th><th>END DATE</th><th>TENURE DAYS</th><th>MONTHS</th></tr>${
+                        filteredActive.map(rowHtml).join('')
+                    }</table>`;
+                }
+
+                // Update team filter dropdown options
+                let allTeams = new Set();
+                [...active, ...inactive].forEach(e => allTeams.add(e.team));
+                let sortedTeams = Array.from(allTeams).sort();
+                teamFilterSelect.innerHTML = '<option value="ALL">All Teams</option>';
+                sortedTeams.forEach(team => {
+                    let opt = document.createElement('option');
+                    opt.value = team;
+                    opt.textContent = team;
+                    teamFilterSelect.appendChild(opt);
+                });
+                teamFilterSelect.value = currentTeamFilter;
+            }
+
+            // Event listeners
+            branchDivs.forEach(div => {
+                div.addEventListener('click', e => {
+                    currentBranch = div.dataset.branch;
+                    currentTeamFilter = "ALL";
+                    if (monthSelect.value) loadMonthData(monthSelect.value);
+                });
+            });
+
+            teamFilterSelect.addEventListener('change', (e) => {
+                currentTeamFilter = e.target.value;
+                if (monthSelect.value) loadMonthData(monthSelect.value);
+            });
+
+            monthSelect.addEventListener('change', (e) => {
+                if (e.target.value) loadMonthData(e.target.value);
+            });
+
+            fetchBtn.addEventListener('click', async () => {
+                if (!adminUnlocked) { alert('Admin access required'); return; }
+                const file = fileInput.files[0];
+                if (!file) { alert('Please select an Excel file first.'); return; }
+                updateMonthLabel(file.name);
+                uploadSpinner.style.display = 'inline-block';
+                fetchBtn.disabled = true;
+                try {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const data = new Uint8Array(e.target.result);
+                        const wb = XLSX.read(data, { type: 'array' });
+                        const employees = parseWorkbook(wb, file.name);
+                        const month = extractMonthFromFilename(file.name);
+                        console.log('Extracted month:', month, 'from filename:', file.name);
+
+                        const employeesWithMonth = employees.map(emp => ({ ...emp, month }));
+
+                        // Delete existing data for this month and branch
+                        const branches = [...new Set(employeesWithMonth.map(e => e.branch))];
+                        for (let branch of branches) {
+                            await supabase
+                                .from('employees')
+                                .delete()
+                                .eq('month', month)
+                                .eq('branch', branch);
+                            console.log(`Deleted existing data for ${month} / ${branch}`);
+                        }
+
+                        await saveEmployees(employeesWithMonth);
+                        alert('Upload successful!');
+                        await loadMonths();
+                    };
+                    reader.readAsArrayBuffer(file);
+                } catch (err) {
+                    console.error('Upload error:', err);
+                    alert('Upload failed: ' + err.message);
+                } finally {
+                    uploadSpinner.style.display = 'none';
+                    fetchBtn.disabled = false;
+                }
+            });
+
+            // Initial load
+            updateMonthLabel('no file');
+            loadMonths();
+        })();
+    </script>
+</body>
+</html>
