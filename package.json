@@ -1,0 +1,10 @@
+{
+  "name": "tenure-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Alpha Konnect tenure dashboard - static page + Vercel serverless API over Neon Postgres",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0"
+  }
+}
