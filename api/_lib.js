@@ -2,23 +2,46 @@
 // The Neon connection string never reaches the browser - it lives only in the
 // Vercel environment, which is the whole point of moving off the anon key.
 import { neon } from '@neondatabase/serverless';
-import crypto from 'node:crypto';
-
-export const sql = neon(process.env.DATABASE_URL);
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const COOKIE = 'tenure_admin';
 const TTL_MS = 8 * 60 * 60 * 1000;   // admin session lasts a working day
 
 function mac(payload, secret) {
-  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return createHmac('sha256', secret).update(payload).digest('hex');
 }
+
+function connectionString() {
+  return process.env.DATABASE_URL
+      || process.env.POSTGRES_URL
+      || process.env.DATABASE_URL_UNPOOLED
+      || '';
+}
+
+// Lazily created so a missing DATABASE_URL returns JSON from the handler
+// instead of crashing the whole function at import time (Vercel 500 HTML).
+let _sql;
+export function getSql() {
+  if (_sql) return _sql;
+  const url = connectionString();
+  if (!url) {
+    throw new Error('DATABASE_URL is not set. Add the Neon pooled connection string in Vercel > Settings > Environment Variables (Production and Preview), then redeploy.');
+  }
+  _sql = neon(url);
+  return _sql;
+}
+
+export function sql(strings, ...values) {
+  return getSql()(strings, ...values);
+}
+sql.transaction = (...args) => getSql().transaction(...args);
 
 // Constant-time compare that does not leak length via an exception.
 export function safeEqual(a, b) {
   const ba = Buffer.from(String(a), 'utf8');
   const bb = Buffer.from(String(b), 'utf8');
   if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
+  return timingSafeEqual(ba, bb);
 }
 
 export function isAdmin(req) {
@@ -46,3 +69,12 @@ export function clearSessionCookie(res) {
 }
 
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+// Neon includes the connection string in some errors. Never send that to the browser.
+export function publicError(err, fallback) {
+  const raw = String((err && err.message) || fallback || 'Server error');
+  if (/postgres(ql)?:\/\//i.test(raw)) {
+    return 'Database connection string is invalid. Check DATABASE_URL in Vercel.';
+  }
+  return raw;
+}

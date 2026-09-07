@@ -1,4 +1,4 @@
-import { sql } from './_lib.js';
+import { sql, publicError } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -9,6 +9,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ months: rows.map(r => r.month) });
   } catch (err) {
     console.error('months:', err);
-    return res.status(500).json({ error: 'Could not load months' });
+    return res.status(500).json({ error: publicError(err, 'Could not load months') });
   }
 }

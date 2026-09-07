@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Alpha Konnect tenure dashboard - static page + Vercel serverless API over Neon Postgres",
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0"
   }

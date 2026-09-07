@@ -1,4 +1,4 @@
-import { sql, MONTH_RE } from './_lib.js';
+import { sql, MONTH_RE, publicError } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -18,6 +18,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ employees: rows });
   } catch (err) {
     console.error('employees:', err);
-    return res.status(500).json({ error: 'Could not load data' });
+    return res.status(500).json({ error: publicError(err, 'Could not load data') });
   }
 }

@@ -289,7 +289,7 @@
                 }, options || {}));
                 let body = null;
                 try { body = await res.json(); } catch (e) { /* non-JSON error page */ }
-                if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + res.statusText));
+                if (!res.ok) throw new Error((body && body.error) || ('HTTP ' + res.status));
                 return body;
             }
 

@@ -1,4 +1,4 @@
-import { sql, isAdmin, MONTH_RE } from './_lib.js';
+import { sql, isAdmin, MONTH_RE, publicError } from './_lib.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '4mb' } } };
 
@@ -46,6 +46,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, month, inserted: employees.length, branches });
   } catch (err) {
     console.error('upload:', err);
-    return res.status(500).json({ error: 'Upload failed, nothing was changed: ' + err.message });
+    return res.status(500).json({ error: 'Upload failed, nothing was changed: ' + publicError(err, 'database error') });
   }
 }

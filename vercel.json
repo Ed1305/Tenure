@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/months.js": { "includeFiles": "api/_lib.js" },
+    "api/employees.js": { "includeFiles": "api/_lib.js" },
+    "api/login.js": { "includeFiles": "api/_lib.js" },
+    "api/upload.js": { "includeFiles": "api/_lib.js" }
+  }
+}
