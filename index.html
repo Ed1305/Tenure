@@ -12,8 +12,6 @@
     <!-- Chart.js & SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <!-- Supabase JS -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; font-family:'Inter',sans-serif; color:#fff; }
         body { min-height:100vh; background:linear-gradient(145deg,#0b1120 0%,#19223f 100%); padding:1rem 0.8rem; display:flex; justify-content:center; align-items:flex-start; font-size:12.5px; }
@@ -64,6 +62,11 @@
         .filter-row select option { background:#1a2340; }
         .lock-icon { cursor:pointer; color:#b2c3ff; font-size:1rem; transition:0.2s; }
         .lock-icon:hover { color:white; }
+        .status-banner { display:none; margin:0.6rem 0 1rem 0; padding:0.6rem 0.9rem; border-radius:12px; font-size:0.72rem; line-height:1.5; border:1px solid; }
+        .status-banner.info  { background:rgba(79,107,255,0.12); border-color:#4f6bb3; color:#cddcff; }
+        .status-banner.ok    { background:rgba(46,160,110,0.15); border-color:#2ea06e; color:#c9f2df; }
+        .status-banner.warn  { background:rgba(255,190,80,0.12); border-color:#b58b3a; color:#ffe6bb; }
+        .status-banner.error { background:rgba(255,99,132,0.15); border-color:#b3455e; color:#ffd2da; }
         .spinner { border:2px solid rgba(255,255,255,0.3); border-top:2px solid white; border-radius:50%; width:16px; height:16px; animation:spin 1s linear infinite; display:inline-block; margin-left:8px; }
         @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
         @media (max-width:800px) { .flex-charts, .flex-charts-3 { grid-template-columns:1fr; } }
@@ -104,6 +107,8 @@
                 </select>
             </div>
         </div>
+
+        <div id="statusBanner" class="status-banner"></div>
 
         <!-- Summary cards -->
         <div class="cards-grid" id="summaryCards">
@@ -187,16 +192,26 @@
 
     <script>
         (function() {
-            // Supabase setup
-            const supabaseUrl = 'https://vnuvmbnlxhhhbfpiwzef.supabase.co';
-            const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXZtYm5seGhoaGJmcGl3emVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNzUzNDIsImV4cCI6MjA4Nzc1MTM0Mn0.jnImxezvHLiRCdUkgBLgQ97uW-9FHpfcgL3ipvOLpas';
-            const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+            // Data now comes from this site's own /api routes, backed by Neon.
+            // No database URL or key exists in the browser any more.
+            async function api(path, options) {
+                const res = await fetch(path, Object.assign({
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }
+                }, options || {}));
+                let body = null;
+                try { body = await res.json(); } catch (e) { /* non-JSON error page */ }
+                if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + res.statusText));
+                return body;
+            }
 
+            // Global state
             // Global state
             let currentBranch = "combine";
             let fileName = "no file";
             let today = new Date();
             let currentTeamFilter = "ALL";
+            let currentMonthRows = [];
 
             // Allowed active teams per branch
             const allowedActiveTeams = {
@@ -241,87 +256,141 @@
             const inactiveTeamContainer = document.getElementById('inactiveTeamChartContainer');
 
             // Admin state
-            let adminUnlocked = false;
-            const validCode = 'ak_2026';
+            let adminUnlocked = false;   // the code itself now lives in ADMIN_CODE on the server
 
-            // Lock toggle: click the lock icon to lock/unlock admin panel
-            lockToggle.addEventListener('click', () => {
+            function setUnlocked(on) {
+                adminUnlocked = on;
+                adminPanel.classList.toggle('locked', !on);
+                adminControls.style.display = on ? 'inline-flex' : 'none';
+                lockToggle.className = (on ? 'fas fa-unlock-alt' : 'fas fa-lock') + ' lock-icon';
+            }
+            async function tryUnlock() {
                 if (adminUnlocked) {
-                    // lock it
-                    adminUnlocked = false;
-                    adminPanel.classList.add('locked');
-                    adminControls.style.display = 'none';
-                    lockToggle.className = 'fas fa-lock lock-icon';
-                } else {
-                    // unlock if code is correct
-                    if (accessCodeInput.value === validCode) {
-                        adminUnlocked = true;
-                        adminPanel.classList.remove('locked');
-                        adminControls.style.display = 'inline-flex';
-                        lockToggle.className = 'fas fa-unlock-alt lock-icon';
-                        accessCodeInput.value = ''; // clear the code
-                    } else {
-                        alert('Invalid access code');
-                    }
+                    try { await api('/api/login', { method: 'DELETE' }); } catch (e) { /* signing out is best effort */ }
+                    setUnlocked(false);
+                    return;
                 }
-            });
-
-            // Also keep unlock button for convenience
-            unlockBtn.addEventListener('click', () => {
-                if (accessCodeInput.value === validCode) {
-                    adminUnlocked = true;
-                    adminPanel.classList.remove('locked');
-                    adminControls.style.display = 'inline-flex';
-                    lockToggle.className = 'fas fa-unlock-alt lock-icon';
-                    accessCodeInput.value = ''; // clear the code
-                } else {
-                    alert('Invalid access code');
+                unlockBtn.disabled = true;
+                try {
+                    await api('/api/login', { method: 'POST', body: JSON.stringify({ code: accessCodeInput.value }) });
+                    setUnlocked(true);
+                    accessCodeInput.value = '';
+                    showBanner('', 'info');
+                } catch (err) {
+                    showBanner(escapeHtml(err.message), 'error');
+                } finally {
+                    unlockBtn.disabled = false;
                 }
-            });
+            }
+            lockToggle.addEventListener('click', tryUnlock);
+            unlockBtn.addEventListener('click', tryUnlock);
 
-            // helpers
-            function daysBetween(d1, d2) {
-                const diff = Math.abs(d2 - d1);
-                return Math.round(diff / (1000 * 60 * 60 * 24));
+            // ---------- helpers ----------
+            function escapeHtml(v) {
+                return (v === null || v === undefined ? '' : String(v))
+                    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
             }
 
-            function parseDate(excelDate) {
-                if (!excelDate) return null;
-                if (typeof excelDate === 'number') {
-                    return new Date((excelDate - 25569) * 86400 * 1000);
-                }
-                const d = new Date(excelDate);
-                if (!isNaN(d)) return d;
-                if (typeof excelDate === 'string') {
-                    let parts = excelDate.split('/');
-                    if (parts.length === 3) {
-                        let month = parseInt(parts[0], 10) - 1;
-                        let day = parseInt(parts[1], 10);
-                        let year = parseInt(parts[2], 10);
-                        d = new Date(year, month, day);
-                        if (!isNaN(d)) return d;
-                    }
-                }
+            // Normalise a header cell so spacing/punctuation differences between the two
+            // sheets stop mattering ("AWOLEMPLOYEES" vs "AWOL EMPLOYEES", "FAILED PRACTICAL'S").
+            function normHeader(v) {
+                return (v === null || v === undefined ? '' : v.toString())
+                    .toUpperCase().replace(/[^A-Z]+/g,' ').replace(/\s+/g,' ').trim();
+            }
+
+            // Termination sections. status:null = recognised as a section boundary but not
+            // imported (so the section above it stops cleanly instead of swallowing its rows).
+            const TERM_SECTIONS = [
+                { test:/RESIGN/,             status:'Resigned' },
+                { test:/AWOL/,               status:'AWOL' },
+                { test:/TERMINAT/,           status:'Terminated' },
+                { test:/DROPPED OUT/,        status:'Dropped Out' },
+                { test:/FAILED PRACTICAL/,   status:'Failed Practicals' },
+                { test:/MATERNITY/,          status:null },
+                { test:/TEMPORARY LAID OFF/, status:null }
+            ];
+            function matchTermSection(cell) {
+                const h = normHeader(cell);
+                if (!h) return null;
+                for (const s of TERM_SECTIONS) if (s.test.test(h)) return s;
                 return null;
             }
 
+            // The register's termination tables identify a team only by the manager's first
+            // name. Map those onto the team names used in the active sections.
+            const MANAGER_TEAM = {
+                "INVNT CAPE TOWN": {
+                    PROSPER:'TEAM PROSPER', MOSES:'TEAM MOSES', SONWABILE:'TEAM SONWABILE',
+                    NOMBEKO:'INVNT INCUBATION', SOLOMZI:'INVNT INCUBATION'
+                },
+                "ALPHA": {
+                    ISIPHO:'TEAM ISIPHO', AYABONGA:'TEAM AYABONGA',
+                    POPO:'TEAM THANDUXOLO', THANDUXOLO:'TEAM THANDUXOLO',
+                    KHAYA:'TEAM KHAYALETHU', KHAYALETHU:'TEAM KHAYALETHU',
+                    NOMBEKO:'ALPHA INCUBATION', SOLOMZI:'ALPHA INCUBATION'
+                }
+            };
+            function resolveTeam(sheetName, rawManager) {
+                const map = MANAGER_TEAM[sheetName] || {};
+                const key = normHeader(rawManager);
+                if (!key) return null;
+                if (map[key]) return map[key];
+                const first = key.split(' ')[0];
+                return map[first] || null;
+            }
+
+            // Signed, so a start date after an end date shows up instead of hiding.
+            function daysBetween(from, to) {
+                return Math.round((to - from) / 86400000);
+            }
+
+            // Everything is normalised to a UTC midnight so toISOString() never shifts the day.
+            function parseDate(value) {
+                if (value === null || value === undefined || value === '') return null;
+                if (value instanceof Date) {
+                    return isNaN(value) ? null : new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
+                }
+                if (typeof value === 'number') {
+                    return new Date(Math.round((value - 25569) * 86400000));
+                }
+                const s = value.toString().trim();
+                if (!s) return null;
+                let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);            // ISO, as the register specifies
+                if (m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+                m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);   // DD/MM/YYYY
+                if (m) return new Date(Date.UTC(+m[3], +m[2]-1, +m[1]));
+                const d = new Date(s);
+                return isNaN(d) ? null : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            }
+
+            // Throws instead of silently filing the upload under the current month.
             function extractMonthFromFilename(name) {
                 const monthMap = {
-                    january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
-                    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
+                    january:'01', february:'02', march:'03', april:'04', may:'05', june:'06',
+                    july:'07', august:'08', september:'09', october:'10', november:'11', december:'12'
                 };
-                const match = name.match(/\b([A-Za-z]+)\s+(\d{4})\b/i);
-                if (match) {
-                    let monthName = match[1].toLowerCase();
-                    let year = match[2];
-                    let monthNum = monthMap[monthName];
-                    if (monthNum) {
-                        return `${year}-${monthNum}`;
-                    }
-                }
-                console.warn('Could not extract month from filename, using current month');
-                let d = new Date();
-                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                const m = name.match(/\b([A-Za-z]+)\s+(\d{4})\b/);
+                if (m && monthMap[m[1].toLowerCase()]) return m[2] + '-' + monthMap[m[1].toLowerCase()];
+                const iso = name.match(/\b(20\d{2})[-_](0[1-9]|1[0-2])\b/);
+                if (iso) return iso[1] + '-' + iso[2];
+                throw new Error('Could not read a month from the filename "' + name +
+                    '". Rename it to include the month and year, e.g. "FEBRUARY 2026".');
+            }
+
+            // Tenure is a frozen monthly snapshot, anchored to the register's own month-end
+            // so re-uploading the same file always produces the same numbers.
+            function monthEndUTC(monthKey) {
+                const parts = monthKey.split('-').map(Number);
+                return new Date(Date.UTC(parts[0], parts[1], 0));
+            }
+
+            function showBanner(msg, kind) {
+                const el = document.getElementById('statusBanner');
+                if (!el) { console.log(msg); return; }
+                el.className = 'status-banner ' + (kind || 'info');
+                el.innerHTML = msg;
+                el.style.display = msg ? 'block' : 'none';
             }
 
             function updateMonthLabel(name) {
@@ -329,238 +398,171 @@
                 monthSpan.innerText = fileName;
             }
 
-            // ---------- PARSER with detailed logging ----------
+            // ---------- PARSER ----------
+            // Returns { employees, warnings, skippedActive, skippedSections, monthKey }.
+            // Nothing is dropped silently: anything skipped is counted or warned about.
             function parseWorkbook(workbook, fileName) {
+                const monthKey = extractMonthFromFilename(fileName);   // throws on an unreadable name
+                const asOf = monthEndUTC(monthKey);
                 const sheets = ['INVNT CAPE TOWN', 'ALPHA'];
-                let allEmployees = [];
+                const allEmployees = [];
+                const warnings = [];
+                const skippedSections = {};
+                let skippedActive = 0;
 
                 sheets.forEach(sheetName => {
-                    console.log(`\n--- Processing sheet: ${sheetName} ---`);
                     const worksheet = workbook.Sheets[sheetName];
-                    if (!worksheet) {
-                        console.log(`Sheet ${sheetName} not found`);
-                        return;
-                    }
+                    if (!worksheet) { warnings.push('Sheet "' + sheetName + '" not found in the workbook.'); return; }
                     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-                    if (rows.length < 5) {
-                        console.log(`Sheet ${sheetName} has too few rows`);
-                        return;
-                    }
+                    if (rows.length < 5) { warnings.push('Sheet "' + sheetName + '" has too few rows.'); return; }
 
-                    // Locate main header row (contains "EMP CODE" in column A)
-                    let mainHeaderRowIdx = -1;
+                    let hdrIdx = -1;
                     for (let i = 0; i < rows.length; i++) {
-                        const row = rows[i];
-                        if (row[0] && row[0].toString().includes("EMP CODE")) {
-                            mainHeaderRowIdx = i;
-                            console.log(`Main header found at row ${i}`);
-                            break;
-                        }
+                        if (rows[i][0] && rows[i][0].toString().includes('EMP CODE')) { hdrIdx = i; break; }
                     }
-                    if (mainHeaderRowIdx === -1) {
-                        console.log(`Main header not found in ${sheetName}`);
-                        return;
-                    }
+                    if (hdrIdx === -1) { warnings.push('Sheet "' + sheetName + '": no "EMP CODE" header row found.'); return; }
 
                     // ----- ACTIVE EMPLOYEES -----
-                    let currentSection = "";
-                    let activeCount = 0;
-                    for (let i = mainHeaderRowIdx + 1; i < rows.length; i++) {
-                        const row = rows[i];
-                        if (!row || row.length === 0) continue;
-                        const firstCell = row[0] ? row[0].toString().trim() : '';
-                        const secondCell = row[1] ? row[1].toString().trim() : '';
+                    let section = '';
+                    for (let i = hdrIdx + 1; i < rows.length; i++) {
+                        const r = rows[i] || [];
+                        const c0 = (r[0] === undefined || r[0] === null) ? '' : r[0].toString().trim();
+                        const c1 = (r[1] === undefined || r[1] === null) ? '' : r[1].toString().trim();
 
-                        const termKeywords = ["RESIGNED EMPLOYEES", "AWOL EMPLOYEES", "TERMINATED", "DROPPED OUT INCUBATION"];
-                        if (termKeywords.some(k => secondCell.includes(k))) {
-                            console.log(`Termination section header '${secondCell}' found at row ${i}, stopping active parsing`);
-                            break;
-                        }
+                        if (matchTermSection(c1)) break;              // first termination table ends the active list
+                        if (c0 === '' && c1 !== '' && !c1.includes(',')) { section = c1.toUpperCase().trim(); continue; }
+                        if (c0 === '' || c0 === 'EMP CODE' || c0.charAt(0) === '*') continue;   // '*' = the format-example row
 
-                        if (firstCell === '' && secondCell !== '' && !secondCell.includes(',')) {
-                            currentSection = secondCell.toUpperCase().trim();
-                            console.log(`Section header: ${currentSection} at row ${i}`);
+                        const start = parseDate(r[2]);
+                        if (!start) {
+                            warnings.push(sheetName + ' row ' + (i + 1) + ': "' + (c1 || c0) + '" has no readable start date — skipped.');
                             continue;
                         }
-
-                        if (firstCell === '' || firstCell === 'EMP CODE') continue;
-
-                        let empCode = firstCell;
-                        let empName = secondCell;
-                        let startDate = parseDate(row[2]);
-                        if (!startDate) continue;
-
-                        let team = currentSection;
-                        if (!allowedActiveTeams[sheetName].includes(team)) {
-                            // console.log(`Skipping active employee ${empCode} because team ${team} not allowed`);
+                        if (!allowedActiveTeams[sheetName].includes(section)) {
+                            skippedActive++;
+                            skippedSections[section] = (skippedSections[section] || 0) + 1;
                             continue;
                         }
-
-                        let tenureDays = daysBetween(startDate, today);
-                        let tenureMonths = tenureDays / 30.4375;
-
+                        let days = daysBetween(start, asOf);
+                        if (days < 0) {
+                            warnings.push(sheetName + ' row ' + (i + 1) + ': "' + c1 + '" starts after the end of ' + monthKey + ' — tenure shown as 0.');
+                            days = 0;
+                        }
                         allEmployees.push({
-                            month: extractMonthFromFilename(fileName),
-                            branch: sheetName,
-                            emp_code: empCode,
-                            name: empName,
-                            start_date: startDate.toISOString().split('T')[0],
-                            team: team,
-                            status: 'Active',
-                            end_date: null,
-                            tenure_days: tenureDays,
-                            tenure_months: Math.round(tenureMonths * 10) / 10
+                            month: monthKey, branch: sheetName, emp_code: c0, name: c1,
+                            start_date: start.toISOString().split('T')[0], team: section,
+                            status: 'Active', end_date: null,
+                            tenure_days: days, tenure_months: Math.round(days / 30.4375 * 10) / 10
                         });
-                        activeCount++;
                     }
-                    console.log(`Active employees found in ${sheetName}: ${activeCount}`);
 
-                    // ----- INACTIVE EMPLOYEES (from termination tables) -----
-                    const termHeaders = ["RESIGNED EMPLOYEES", "AWOL EMPLOYEES", "TERMINATED", "DROPPED OUT INCUBATION"];
-                    let inactiveCount = 0;
+                    // ----- INACTIVE EMPLOYEES -----
+                    // Index every recognised section header first, then read each section's body
+                    // as [header+1, next header) and stop at its "TOTAL:" footer. Boundary-only
+                    // sections (maternity, temporary laid off) are indexed but not imported.
+                    const secs = [];
+                    for (let i = hdrIdx + 1; i < rows.length; i++) {
+                        const m = matchTermSection((rows[i] || [])[1]);
+                        if (m) secs.push({ idx: i, status: m.status });
+                    }
 
-                    for (let i = mainHeaderRowIdx + 1; i < rows.length; i++) {
-                        const row = rows[i];
-                        if (!row || row.length < 2) continue;
-                        const secondCell = row[1] ? row[1].toString().trim() : '';
+                    secs.forEach((sec, k) => {
+                        if (!sec.status) return;
+                        const endIdx = (k + 1 < secs.length) ? secs[k + 1].idx : rows.length;
+                        const hdr = rows[sec.idx] || [];
 
-                        let status = null;
-                        for (let h of termHeaders) {
-                            if (secondCell.includes(h)) {
-                                if (h.includes("RESIGNED")) status = "Resigned";
-                                else if (h.includes("AWOL")) status = "AWOL";
-                                else if (h.includes("TERMINATED")) status = "Terminated";
-                                else if (h.includes("DROPPED")) status = "Dropped Out";
-                                console.log(`Found termination section: ${status} at row ${i}`);
-                                break;
-                            }
+                        let termCol = -1, mgrCol = -1;
+                        for (let j = 0; j < hdr.length; j++) {
+                            const c = normHeader(hdr[j]);
+                            if (/TERMINATION DATE|RETURN DATE|END DATE/.test(c)) termCol = j;
+                            if (c === 'MANAGER') mgrCol = j;   // exact: 'Team/Department' must not win this
                         }
-                        if (!status) continue;
 
-                        // This row is the header row of the termination section.
-                        // Find column indices: termination date and manager
-                        let termDateCol = -1, managerCol = -1;
-                        for (let j = 0; j < row.length; j++) {
-                            const cell = row[j] ? row[j].toString().toUpperCase() : '';
-                            if (cell.includes('TERMINATION DATE') || cell.includes('RETURN DATE') || cell.includes('END DATE')) termDateCol = j;
-                            if (cell.includes('MANAGER') || cell.includes('TEAM/') || cell.includes('DEPARTMENT')) managerCol = j;
-                        }
-                        console.log(`Termination date column: ${termDateCol}, Manager column: ${managerCol}`);
+                        for (let j = sec.idx + 1; j < endIdx; j++) {
+                            const r = rows[j] || [];
+                            if (normHeader(r[1]) === 'TOTAL') break;
+                            const code = (r[0] === undefined || r[0] === null) ? '' : r[0].toString().trim();
+                            if (code === '' || /^EMPLOYEE CODE$/i.test(code)) continue;
 
-                        // Now iterate rows starting from i+1 until next section or empty
-                        for (let j = i + 1; j < rows.length; j++) {
-                            const r = rows[j];
-                            if (!r || r.length === 0) break;
-                            const nextSecond = r[1] ? r[1].toString().trim() : '';
-                            if (termHeaders.some(h => nextSecond.includes(h))) {
-                                console.log(`Next termination section at row ${j}, moving outer loop`);
-                                i = j - 1;
-                                break;
+                            const start = parseDate(r[2]);
+                            if (!start) {
+                                warnings.push(sheetName + ' row ' + (j + 1) + ': "' + r[1] + '" has no readable start date — skipped.');
+                                continue;
                             }
-                            let empCode = r[0] ? r[0].toString().trim() : '';
-                            if (empCode === '' || empCode === 'EMPLOYEE CODE' || empCode === 'TOTAL:') continue;
-
-                            let empName = r[1] ? r[1].toString().trim() : '—';
-                            let startDate = parseDate(r[2]);
-                            if (!startDate) continue;
-                            let endDate = null;
-                            if (termDateCol !== -1 && r[termDateCol]) {
-                                endDate = parseDate(r[termDateCol]);
+                            const endDate = (termCol !== -1) ? parseDate(r[termCol]) : null;
+                            const rawMgr = (mgrCol !== -1) ? r[mgrCol] : '';
+                            let team = resolveTeam(sheetName, rawMgr);
+                            if (!team) {
+                                team = 'UNMAPPED';
+                                if (String(rawMgr).trim()) {
+                                    warnings.push(sheetName + ': manager "' + String(rawMgr).trim() +
+                                        '" is not in the team map — "' + r[1] + '" filed under UNMAPPED.');
+                                }
                             }
-                            let team = 'OTHER';
-                            if (managerCol !== -1 && r[managerCol]) {
-                                team = r[managerCol].toString().trim().toUpperCase();
+                            let days = endDate ? daysBetween(start, endDate) : daysBetween(start, asOf);
+                            if (days < 0) {
+                                warnings.push(sheetName + ' row ' + (j + 1) + ': "' + r[1] + '" ends before it starts — tenure shown as 0.');
+                                days = 0;
                             }
-
-                            let tenureDays = endDate ? daysBetween(startDate, endDate) : daysBetween(startDate, today);
-                            let tenureMonths = tenureDays / 30.4375;
-
                             allEmployees.push({
-                                month: extractMonthFromFilename(fileName),
-                                branch: sheetName,
-                                emp_code: empCode,
-                                name: empName,
-                                start_date: startDate.toISOString().split('T')[0],
-                                team: team,
-                                status: status,
+                                month: monthKey, branch: sheetName, emp_code: code,
+                                name: r[1] ? r[1].toString().trim() : '—',
+                                start_date: start.toISOString().split('T')[0], team: team,
+                                status: sec.status,
                                 end_date: endDate ? endDate.toISOString().split('T')[0] : null,
-                                tenure_days: tenureDays,
-                                tenure_months: Math.round(tenureMonths * 10) / 10
+                                tenure_days: days, tenure_months: Math.round(days / 30.4375 * 10) / 10
                             });
-                            inactiveCount++;
                         }
-                    }
-                    console.log(`Inactive employees found in ${sheetName}: ${inactiveCount}`);
+                    });
                 });
 
-                console.log('Total parsed employees:', allEmployees.length);
-                return allEmployees;
+                return { employees: allEmployees, warnings: warnings, skippedActive: skippedActive,
+                         skippedSections: skippedSections, monthKey: monthKey };
             }
 
-            // ---------- SUPABASE: fetch months and data ----------
+            // ---------- API: months and month data ----------
             async function loadMonths() {
-                const { data, error } = await supabase
-                    .from('employees')
-                    .select('month')
-                    .order('month', { ascending: false });
-                if (error) {
-                    console.error('Error loading months:', error);
+                const previous = monthSelect.value;
+                let months;
+                try {
+                    months = (await api('/api/months')).months || [];
+                } catch (err) {
+                    console.error('Error loading months:', err);
                     monthSelect.innerHTML = '<option value="">Error loading months</option>';
+                    showBanner('Could not load months: ' + escapeHtml(err.message), 'error');
                     return;
                 }
-                const months = [...new Set(data.map(d => d.month))];
                 monthSelect.innerHTML = '';
                 if (months.length === 0) {
                     monthSelect.innerHTML = '<option value="">No data</option>';
+                    currentMonthRows = [];
                     renderAll([]);
                     return;
                 }
                 months.forEach(m => {
-                    let opt = document.createElement('option');
+                    const opt = document.createElement('option');
                     opt.value = m;
-                    let [year, monthNum] = m.split('-');
-                    let date = new Date(year, monthNum-1, 1);
-                    opt.textContent = date.toLocaleDateString('en-US', { year:'numeric', month:'long' });
+                    const parts = m.split('-');
+                    opt.textContent = new Date(parts[0], parts[1] - 1, 1)
+                        .toLocaleDateString('en-ZA', { year: 'numeric', month: 'long' });
                     monthSelect.appendChild(opt);
                 });
-                monthSelect.value = months[0];
-                await loadMonthData(months[0]);
+                // keep whatever the user was looking at rather than snapping back to the newest
+                monthSelect.value = months.includes(previous) ? previous : months[0];
+                await loadMonthData(monthSelect.value);
             }
 
             async function loadMonthData(month) {
-                const { data, error } = await supabase
-                    .from('employees')
-                    .select('*')
-                    .eq('month', month);
-                if (error) {
-                    console.error('Error loading data:', error);
-                    alert('Error loading data: ' + error.message);
-                    return;
+                try {
+                    const body = await api('/api/employees?month=' + encodeURIComponent(month));
+                    // Cached so branch and team switching is instant instead of re-querying.
+                    currentMonthRows = body.employees || [];
+                    renderAll(currentMonthRows);
+                } catch (err) {
+                    console.error('Error loading data:', err);
+                    showBanner('Could not load data: ' + escapeHtml(err.message), 'error');
                 }
-                console.log(`Loaded ${data.length} employees for month ${month}`);
-                renderAll(data);
             }
-
-            async function saveEmployees(employees) {
-                console.log(`Inserting ${employees.length} employees...`);
-                const { data, error } = await supabase
-                    .from('employees')
-                    .insert(employees);
-                if (error) {
-                    console.error('Supabase insert error:', error);
-                    throw error;
-                }
-                console.log(`Inserted ${employees.length} employees successfully`);
-            }
-
-            // Subscribe to realtime changes
-            supabase
-                .channel('employees_changes')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, payload => {
-                    console.log('Realtime update', payload);
-                    loadMonths();
-                })
-                .subscribe();
 
             // ---------- RENDER functions ----------
             function renderAll(employees) {
@@ -622,7 +624,8 @@
                     `;
                 }
 
-                const bins = [0,3,6,9,12,18,24,36];
+                // Top bin is open-ended: anyone past 36 months used to match no bin at all.
+                const bins = [0,3,6,9,12,18,24,36,Infinity];
                 const counts = new Array(bins.length-1).fill(0);
                 activeEmps.forEach(e => {
                     const m = e.tenure_months;
@@ -643,7 +646,7 @@
                     combinedChartInst = new Chart(ctx, {
                         type: 'bar',
                         data: {
-                            labels: ['0-3m', '3-6m', '6-9m', '9-12m', '12-18m', '18-24m', '24-36m'],
+                            labels: ['0-3m', '3-6m', '6-9m', '9-12m', '12-18m', '18-24m', '24-36m', '36m+'],
                             datasets: [{
                                 label: 'staff count',
                                 data: counts,
@@ -678,7 +681,7 @@
                 teamMap.forEach((v, k) => {
                     const avgM = v.sumMonths / v.count;
                     const avgD = v.sumDays / v.count;
-                    teamRows += `<tr><td>${v.branch}</td><td><span class="team-badge">${v.team}</span></td><td>${v.count}</td><td>${avgM.toFixed(1)}</td><td>${Math.round(avgD)}</td></tr>`;
+                    teamRows += `<tr><td>${escapeHtml(v.branch)}</td><td><span class="team-badge">${escapeHtml(v.team)}</span></td><td>${v.count}</td><td>${avgM.toFixed(1)}</td><td>${Math.round(avgD)}</td></tr>`;
                     teamLabels.push(v.team);
                     teamAvgMonths.push(avgM);
                 });
@@ -789,8 +792,8 @@
                     const endDateStr = e.end_date ? e.end_date : 'NOT APPLICABLE';
                     const startStr = e.start_date;
                     return `<tr>
-                        <td>${e.emp_code}</td><td>${e.name}</td><td>${startStr}</td><td>${e.team}</td>
-                        <td>${e.status}</td><td>${endDateStr}</td><td>${e.tenure_days}</td><td>${e.tenure_months}</td>
+                        <td>${escapeHtml(e.emp_code)}</td><td>${escapeHtml(e.name)}</td><td>${escapeHtml(startStr)}</td><td>${escapeHtml(e.team)}</td>
+                        <td>${escapeHtml(e.status)}</td><td>${escapeHtml(endDateStr)}</td><td>${e.tenure_days}</td><td>${e.tenure_months}</td>
                     </tr>`;
                 }
 
@@ -818,7 +821,7 @@
                 sortedTeams.forEach(team => {
                     let opt = document.createElement('option');
                     opt.value = team;
-                    opt.textContent = team;
+                    opt.textContent = team;   // textContent, so no escaping needed
                     teamFilterSelect.appendChild(opt);
                 });
                 teamFilterSelect.value = currentTeamFilter;
@@ -826,16 +829,16 @@
 
             // Event listeners
             branchDivs.forEach(div => {
-                div.addEventListener('click', e => {
+                div.addEventListener('click', () => {
                     currentBranch = div.dataset.branch;
                     currentTeamFilter = "ALL";
-                    if (monthSelect.value) loadMonthData(monthSelect.value);
+                    renderAll(currentMonthRows);      // already in memory — no round trip
                 });
             });
 
             teamFilterSelect.addEventListener('change', (e) => {
                 currentTeamFilter = e.target.value;
-                if (monthSelect.value) loadMonthData(monthSelect.value);
+                renderAll(currentMonthRows);          // already in memory — no round trip
             });
 
             monthSelect.addEventListener('change', (e) => {
@@ -843,42 +846,59 @@
             });
 
             fetchBtn.addEventListener('click', async () => {
-                if (!adminUnlocked) { alert('Admin access required'); return; }
+                if (!adminUnlocked) { showBanner('Admin access required', 'error'); return; }
                 const file = fileInput.files[0];
-                if (!file) { alert('Please select an Excel file first.'); return; }
+                if (!file) { showBanner('Choose an Excel file first.', 'error'); return; }
+
                 updateMonthLabel(file.name);
                 uploadSpinner.style.display = 'inline-block';
                 fetchBtn.disabled = true;
+                showBanner('Reading ' + escapeHtml(file.name) + '…', 'info');
+
                 try {
-                    const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        const data = new Uint8Array(e.target.result);
-                        const wb = XLSX.read(data, { type: 'array' });
-                        const employees = parseWorkbook(wb, file.name);
-                        const month = extractMonthFromFilename(file.name);
-                        console.log('Extracted month:', month, 'from filename:', file.name);
+                    // Parse everything BEFORE deleting anything, so a bad file can never
+                    // wipe a month that is already stored.
+                    const buf = await file.arrayBuffer();
+                    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+                    const result = parseWorkbook(wb, file.name);   // throws on an unreadable filename
+                    const employees = result.employees;
+                    const month = result.monthKey;
 
-                        const employeesWithMonth = employees.map(emp => ({ ...emp, month }));
+                    if (employees.length === 0) {
+                        showBanner('No employees were read from that file — nothing was changed.', 'error');
+                        return;
+                    }
 
-                        // Delete existing data for this month and branch
-                        const branches = [...new Set(employeesWithMonth.map(e => e.branch))];
-                        for (let branch of branches) {
-                            await supabase
-                                .from('employees')
-                                .delete()
-                                .eq('month', month)
-                                .eq('branch', branch);
-                            console.log(`Deleted existing data for ${month} / ${branch}`);
-                        }
+                    // One call, one transaction on the server: the month's rows are
+                    // replaced atomically, so a failure can no longer empty a month.
+                    await api('/api/upload', {
+                        method: 'POST',
+                        body: JSON.stringify({ month: month, employees: employees })
+                    });
 
-                        await saveEmployees(employeesWithMonth);
-                        alert('Upload successful!');
-                        await loadMonths();
-                    };
-                    reader.readAsArrayBuffer(file);
+                    // Report what was imported AND what wasn't.
+                    const counts = {};
+                    employees.forEach(e => { counts[e.status] = (counts[e.status] || 0) + 1; });
+                    const summary = Object.keys(counts).sort().map(k => escapeHtml(k) + ': ' + counts[k]).join(' &middot; ');
+                    const skippedList = Object.keys(result.skippedSections).sort()
+                        .map(k => escapeHtml(k || '(no section)') + ' ' + result.skippedSections[k]).join(', ');
+
+                    let msg = '<strong>Imported ' + employees.length + ' rows for ' + escapeHtml(month) + '</strong><br>' + summary;
+                    if (result.skippedActive) {
+                        msg += '<br>Skipped ' + result.skippedActive + ' non-agent staff (' + skippedList + ')';
+                    }
+                    if (result.warnings.length) {
+                        msg += '<br><span style="color:#ffd27f">' + result.warnings.length + ' warning(s):</span><br>' +
+                               result.warnings.slice(0, 10).map(escapeHtml).join('<br>');
+                        if (result.warnings.length > 10) msg += '<br>…and ' + (result.warnings.length - 10) + ' more (see console)';
+                        console.warn('Import warnings:', result.warnings);
+                    }
+                    showBanner(msg, result.warnings.length ? 'warn' : 'ok');
+
+                    await loadMonths();
                 } catch (err) {
                     console.error('Upload error:', err);
-                    alert('Upload failed: ' + err.message);
+                    showBanner('Upload failed: ' + escapeHtml(err.message || String(err)), 'error');
                 } finally {
                     uploadSpinner.style.display = 'none';
                     fetchBtn.disabled = false;
